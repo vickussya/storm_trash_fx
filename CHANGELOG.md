@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here mirrors `bl_info["version"]` in `__init__.py`.
 
+## [1.4.0] - 2026-08-27
+
+### Added
+
+- **Spin** - objects tumble as the storm passes and keep the orientation they
+  are left in, so the pile settles at new angles instead of returning to its
+  rest pose. Controls: *Spin Turns* (rotations the lightest object makes),
+  *Spin Axis* (X / Y / Z / Random per object) and *Spin Variation*. Direction
+  is randomly signed per object, and the amount is weight-scaled.
+
+  A driver has no memory - it is a pure function of `frame` and where the storm
+  is right now - so an accumulating rotation cannot be integrated from the
+  proximity gate; gating `rate * frame` winds an object up on the way in and
+  unwinds it on the way out. Apply therefore samples the storm's path across
+  the scene frame range, finds the frames during which it comes within reach of
+  each object, and emits a ramp clamped at both ends. Two consequences: Apply
+  steps the frame range when Spin is on (and only then), and re-timing or
+  moving the storm means re-applying.
+
+- Apply warns when Spin is on but the storm never passes within reach of
+  anything selected.
+
+### Changed
+
+- Wobble and spin can share a rotation axis, so the expression builder now
+  gives the wobble a character budget and drops octaves rather than overrun
+  Blender's 256-character driver limit. Worst case measured at 233.
+- `tools/check.py` covers the spin ramp (zero before the pass, monotonic
+  through it, holding after, never running backwards), the pass-window
+  search, random axis and direction spread, and the worst-case combined
+  expression length.
+
 ## [1.3.0] - 2026-08-27
 
 Shake polish. The old shake read as fast vibration rather than wind, and had

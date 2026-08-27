@@ -49,6 +49,18 @@ class STORMFX_OT_apply(bpy.types.Operator):
         render = scene.render
         fps = render.fps / max(1e-6, render.fps_base)
 
+        # Spin needs to know when the storm passes each object, which means
+        # sampling its path.  That steps the scene, so it happens after every
+        # measurement above is taken, and only when spin is actually on.
+        windows = {}
+        if props.do_shake and props.do_spin:
+            track = measure.storm_track(
+                scene, storm, context.evaluated_depsgraph_get)
+            reach = max(0.0001, props.radius) * max(0.01, props.shake_reach)
+            for o in targets:
+                windows[o] = measure.pass_window(
+                    track, stats[o][0], stats[o][1], reach)
+
         done = 0
         capped = 0
         for o in targets:
@@ -60,7 +72,8 @@ class STORMFX_OT_apply(bpy.types.Operator):
                 ceiling = 0.0
                 if props.do_lift:
                     capped += 1
-            rig.apply_to_object(o, storm, props, lightness, (cx, cy), ceiling, fps)
+            rig.apply_to_object(o, storm, props, lightness, (cx, cy), ceiling,
+                                fps, windows.get(o))
             o.update_tag()
             done += 1
 
@@ -70,6 +83,10 @@ class STORMFX_OT_apply(bpy.types.Operator):
         msg = "Storm FX applied to {} object(s)".format(done)
         if capped:
             msg += " ({} too tall to lift - shake only)".format(capped)
+        if windows and not any(w for w in windows.values()):
+            msg += "; no spin - the storm never passes within reach"
+            self.report({'WARNING'}, msg)
+            return {'FINISHED'}
         self.report({'INFO'}, msg)
         return {'FINISHED'}
 

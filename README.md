@@ -7,7 +7,8 @@ For every selected object it creates drivers so that, as a moving storm object
 passes over it, the object:
 
 * **rises** on Delta Location Z (lift),
-* **tilts and twists** on Delta Rotation (shake), fading in with proximity, and
+* **tilts and twists** on Delta Rotation (shake), fading in with proximity,
+* **tumbles**, keeping the orientation the storm leaves it in, and
 * **rattles** slightly sideways on Delta Location X/Y,
 
 and settles back to rest as the storm moves on. The effect is strongest right
@@ -126,6 +127,10 @@ the objects back at rest.
 | **Shake Reach** | `1.4` | Shake radius as a multiple of *Influence Radius*. Above `1`, trash trembles before it starts to rise. |
 | **Rattle** | on | Also jitter objects horizontally, not just rotate them. |
 | **Rattle Amount** | `0.05` | Peak horizontal jitter for the lightest object, in scene units. |
+| **Spin** | on | Let objects tumble as the storm passes, keeping the orientation they're left in. |
+| **Spin Turns** | `0.5` | Full rotations the lightest object makes while the storm passes it. |
+| **Spin Axis** | Random | Axis objects tumble around. `Z` spins them flat like a coin, `X`/`Y` roll them over. |
+| **Spin Variation** | `0.5` | Random spread of how far each object turns. Direction is always random. |
 | **Random Seed** | `1` | Change for a different set of per-object phases and speeds. |
 
 ### Bake
@@ -185,6 +190,25 @@ the octaves are as loud as the base and it reads as a rattle. The octave ratios
 (2.3×, 4.7×) are deliberately not whole numbers — harmonically related octaves
 re-align into an obvious repeating pattern. `A` is divided by the sum of the
 octave amplitudes, so *Tilt Amount* is the true peak in degrees.
+
+**Spin is the one thing that isn't an oscillation.** A driver has no memory —
+it is a pure function of `frame` and where the storm is *right now* — so an
+accumulating rotation cannot be integrated from the proximity gate. Gating
+`rate * frame` would wind an object up on the way in and unwind it on the way
+out, landing it back where it started. Instead, Apply samples the storm's path
+across the scene frame range, finds the frames during which it comes within
+reach of each object, and emits a ramp that clamps at both ends:
+
+```
+min(1.0, max(0.0, (frame - frame_in) * (1/span))) * total_radians
+```
+
+Zero before the pass, winding on through it, and holding afterwards — so the
+pile settles at new angles, as if it had actually been thrown about. Direction
+is randomly signed per object and the amount is weight-scaled, so light pieces
+tumble and heavy ones barely turn. This is why Apply steps through the frame
+range when Spin is on, and why **spin timing goes stale if you re-time the
+storm** — re-apply.
 
 **Speed is in cycles per second.** A driver only knows `frame`, so the scene
 frame rate is folded into `F` at Apply time — meaning **if you change the scene
@@ -276,6 +300,14 @@ you applied.
 
 **Everything shakes in unison.** Raise *Speed Variation*, and *Speed by Weight*
 if the pile has a mix of sizes.
+
+**Nothing spins.** Apply reports *"no spin — the storm never passes within
+reach"* when the storm's path never brings it within *Influence Radius* x
+*Shake Reach* of any selected object. Check the storm is actually animated
+across the scene frame range, and that the range covers the pass.
+
+**Spin happens at the wrong time.** The pass window is baked at Apply time from
+the storm's path. Re-time or move the storm and you need to re-apply.
 
 **Rotation makes objects bob up and down.** Delta rotation pivots on the object
 origin, so an origin at the object's centre swings the geometry vertically. Set

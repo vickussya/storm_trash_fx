@@ -84,6 +84,13 @@ class STORMFX_PT_panel(bpy.types.Panel):
         if props.do_rattle:
             sub.prop(props, "rattle_distance")
 
+        sub = box.box()
+        sub.prop(props, "do_spin")
+        if props.do_spin:
+            sub.prop(props, "spin_turns")
+            sub.prop(props, "spin_axis")
+            sub.prop(props, "spin_variation", slider=True)
+
         box.prop(props, "seed")
 
     def _draw_actions(self, layout):

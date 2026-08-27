@@ -107,10 +107,32 @@ def oscillator_expr(base_freq, roughness, rng, budget=_EXPRESSION_BUDGET):
     return "(" + "+".join(terms) + ")", peak
 
 
-def wobble_expr(gate, amplitude, base_freq, roughness, rng):
-    """Gate * amplitude * a layered wobble, normalised to peak at amplitude."""
-    osc, peak = oscillator_expr(base_freq, roughness, rng)
+def wobble_expr(gate, amplitude, base_freq, roughness, rng,
+                budget=_EXPRESSION_BUDGET):
+    """Gate * amplitude * a layered wobble, normalised to peak at amplitude.
+
+    ``budget`` is the room left for the whole expression; the octaves are what
+    give way when a spin term has to share the channel.
+    """
+    osc, peak = oscillator_expr(base_freq, roughness, rng,
+                                budget=max(30, budget - len(gate) - 12))
     return "{G}*{A:.6f}*{O}".format(G=gate, A=amplitude / peak, O=osc)
+
+
+def spin_expr(frame_in, frame_out, radians):
+    """Rotation that winds on as the storm passes, then holds.
+
+    A driver has no memory - it is a pure function of `frame` and where the
+    storm is right now - so an accumulating spin cannot be integrated from the
+    proximity gate: gating `rate * frame` would wind the object up on the way
+    in and unwind it on the way out.  Instead the frames during which the storm
+    is within reach of this object are found at Apply time, and the rotation
+    ramps between them and clamps at both ends.  Before the pass it is 0, after
+    it the object keeps the orientation it was left in.
+    """
+    span = max(1.0, float(frame_out) - float(frame_in))
+    return "min(1.0,max(0.0,(frame-{A:.1f})*{B:.6f}))*{T:.6f}".format(
+        A=frame_in, B=1.0 / span, T=radians)
 
 
 def lift_expr(gate, amplitude):
@@ -133,6 +155,30 @@ def object_speed_hz(props, lightness, rng):
     if props.shake_speed_variation > 0.0:
         scale *= 1.0 + props.shake_speed_variation * rng.uniform(-1.0, 1.0)
     return max(0.0, props.shake_speed) * max(_MIN_SPEED_SCALE, scale)
+
+
+_SPIN_AXIS_INDEX = {'X': 0, 'Y': 1, 'Z': 2}
+
+
+def object_spin_axis(props, rng):
+    """Which axis this object tumbles around."""
+    if props.spin_axis == 'RANDOM':
+        return rng.choice((0, 1, 2))
+    return _SPIN_AXIS_INDEX.get(props.spin_axis, 2)
+
+
+def object_spin_radians(props, factor, rng):
+    """Total rotation this object picks up over the pass, in radians.
+
+    Weight-scaled, spread by Spin Variation, and randomly signed - half the
+    pile tumbling one way and half the other is most of what sells it.
+    """
+    turns = props.spin_turns * factor
+    if props.spin_variation > 0.0:
+        turns *= 1.0 + props.spin_variation * rng.uniform(-1.0, 1.0)
+    if rng.random() < 0.5:
+        turns = -turns
+    return turns * 2.0 * math.pi
 
 
 def shake_axes(props):
@@ -214,12 +260,15 @@ def add_driver(obj, data_path, index, storm, expression):
     return fc
 
 
-def apply_to_object(obj, storm, props, lightness, rest, ceiling, fps):
+def apply_to_object(obj, storm, props, lightness, rest, ceiling, fps,
+                    spin_window=None):
     """Build the rig on one object.
 
     ``lightness`` is 1.0 for the smallest object in the selection and 0.0 for
     the largest, ``rest`` is the object's resting ``(center_x, center_y)``, and
-    ``ceiling`` its available headroom under the storm.  Channels that end up
+    ``ceiling`` its available headroom under the storm, and ``spin_window`` the
+    ``(first_frame, last_frame)`` during which the storm passes it - ``None``
+    if spin is off or the storm never comes near.  Channels that end up
     undriven are reset, not just left alone.
     """
     factor = measure.light_factor(lightness, props.min_factor)
@@ -231,7 +280,8 @@ def apply_to_object(obj, storm, props, lightness, rest, ceiling, fps):
         props.falloff)
 
     _apply_lift(obj, storm, props, factor, ceiling, lift_gate)
-    _apply_shake(obj, storm, props, factor, lightness, shake_gate, fps)
+    _apply_shake(obj, storm, props, factor, lightness, shake_gate, fps,
+                 spin_window)
     _apply_rattle(obj, storm, props, factor, lightness, shake_gate, fps)
 
 
@@ -244,29 +294,46 @@ def _apply_lift(obj, storm, props, factor, ceiling, gate):
         channels.reset_channel(obj, channels.LIFT_PATH, channels.LIFT_INDEX)
 
 
-def _apply_shake(obj, storm, props, factor, lightness, gate, fps):
+def _apply_shake(obj, storm, props, factor, lightness, gate, fps, spin_window):
     axes = shake_axes(props)
-    if not axes:
+
+    spin_axis = None
+    spin_radians = 0.0
+    if props.do_shake and props.do_spin and spin_window is not None:
+        spin_rng = object_rng(props.seed, obj.name, "spin")
+        spin_axis = object_spin_axis(props, spin_rng)
+        spin_radians = object_spin_radians(props, factor, spin_rng)
+        if abs(spin_radians) < 1e-9:
+            spin_axis = None
+
+    if not axes and spin_axis is None:
         for a in (0, 1, 2):
             channels.reset_channel(obj, channels.SHAKE_PATH, a)
         return
 
     channels.ensure_euler(obj)
-    speed_rng = object_rng(props.seed, obj.name, "speed")
-    hz = object_speed_hz(props, lightness, speed_rng)
+    hz = object_speed_hz(props, lightness, object_rng(props.seed, obj.name, "speed"))
     for a in (0, 1, 2):
-        if a not in axes:
-            channels.reset_channel(obj, channels.SHAKE_PATH, a)
-            continue
+        terms = []
+        spin_term = ""
+        if a == spin_axis:
+            spin_term = spin_expr(spin_window[0], spin_window[1], spin_radians)
+
         amplitude = math.radians(axis_degrees(props, a)) * factor
-        if amplitude <= 1e-9 or hz <= 0.0:
+        if a in axes and amplitude > 1e-9 and hz > 0.0:
+            rng = object_rng(props.seed, obj.name, "shake%d" % a)
+            # a slight per-axis frequency offset stops the axes tracing a line
+            freq = frame_frequency(hz * (1.0 + 0.17 * a), fps)
+            terms.append(wobble_expr(
+                gate, amplitude, freq, props.shake_roughness, rng,
+                budget=_EXPRESSION_BUDGET - len(spin_term) - 2))
+        if spin_term:
+            terms.append(spin_term)
+
+        if not terms:
             channels.reset_channel(obj, channels.SHAKE_PATH, a)
             continue
-        rng = object_rng(props.seed, obj.name, "shake%d" % a)
-        # a slight per-axis frequency offset stops the axes tracing a line
-        freq = frame_frequency(hz * (1.0 + 0.17 * a), fps)
-        add_driver(obj, channels.SHAKE_PATH, a, storm,
-                   wobble_expr(gate, amplitude, freq, props.shake_roughness, rng))
+        add_driver(obj, channels.SHAKE_PATH, a, storm, "+".join(terms))
 
 
 def _apply_rattle(obj, storm, props, factor, lightness, gate, fps):

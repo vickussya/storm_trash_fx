@@ -85,3 +85,60 @@ def lightness(size, size_min, size_max):
 def light_factor(lightness_value, min_factor):
     """Map lightness -> amplitude factor in ``[min_factor, 1]``."""
     return min_factor + (1.0 - min_factor) * max(0.0, min(1.0, lightness_value))
+
+
+def storm_track(scene, storm, depsgraph_get=None, max_samples=120):
+    """Sample the storm's world XY across the scene frame range.
+
+    Used to work out when the storm passes each object, which is what lets the
+    spin accumulate and then hold - a driver is a pure function of `frame` and
+    the storm's current position, so it has no memory of its own.
+
+    Steps the scene, which is not free, so only call it when spin is enabled.
+    The current frame is restored afterwards.
+    """
+    f0, f1 = scene.frame_start, scene.frame_end
+    if f1 < f0:
+        f0, f1 = f1, f0
+    step = max(1, int(math.ceil((f1 - f0 + 1) / float(max(1, max_samples)))))
+    original = scene.frame_current
+    track = []
+    try:
+        frames = list(range(f0, f1 + 1, step))
+        if frames and frames[-1] != f1:
+            frames.append(f1)
+        for f in frames:
+            scene.frame_set(f)
+            ob = storm
+            if depsgraph_get is not None:
+                try:
+                    ob = storm.evaluated_get(depsgraph_get())
+                except Exception:
+                    ob = storm
+            p = ob.matrix_world.translation
+            track.append((float(f), p.x, p.y))
+    finally:
+        scene.frame_set(original)
+    return track
+
+
+def pass_window(track, cx, cy, reach):
+    """``(first_frame, last_frame)`` the storm spends within ``reach`` of a point.
+
+    ``None`` if it never comes close enough.  Widened to the track's sampling
+    step when the storm crosses in a single sample, so a fast pass still gets a
+    window to spin over rather than an instant snap.
+    """
+    if not track:
+        return None
+    limit = reach * reach
+    inside = [f for (f, x, y) in track
+              if (x - cx) ** 2 + (y - cy) ** 2 <= limit]
+    if not inside:
+        return None
+    first, last = min(inside), max(inside)
+    step = (track[1][0] - track[0][0]) if len(track) > 1 else 1.0
+    if last - first < step:
+        half = max(step, 1.0) * 0.5
+        first, last = first - half, last + half
+    return (first, last)

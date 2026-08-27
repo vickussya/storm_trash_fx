@@ -221,6 +221,11 @@ change is verified.
   is inlined into every driver; a three-octave shake lands around 180. That is
   why `rig.oscillator_expr` counts its octaves against a budget instead of
   emitting them unconditionally. Check the length before adding terms.
+* **Drivers are stateless.** A driver is a pure function of `frame` and its
+  variables; it cannot integrate, accumulate, or remember the previous frame.
+  Anything that has to build up and stay - the spin - must be precomputed into
+  a ramp at Apply time. Gating a `frame`-based term with the proximity gate
+  does not accumulate: it unwinds as the storm leaves.
 * **Driver expressions cannot read the scene frame rate.** Anything expressed
   in seconds has to be converted to per-frame constants at Apply time, which
   means the rig goes stale if the user changes the fps. Say so in the tooltip

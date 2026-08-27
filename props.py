@@ -113,6 +113,34 @@ class StormFXProps(bpy.types.PropertyGroup):
         default=0.05, min=0.0, soft_max=1.0, subtype='DISTANCE',
     )
 
+    # ---- shake: accumulating spin ------------------------------------------
+    do_spin: bpy.props.BoolProperty(
+        name="Spin",
+        description="Let objects tumble as the storm passes, keeping the orientation they are left in",
+        default=True,
+    )
+    spin_turns: bpy.props.FloatProperty(
+        name="Spin Turns",
+        description="Full rotations the lightest object makes while the storm passes it. 0.25 is a quarter turn",
+        default=0.5, min=0.0, soft_max=10.0,
+    )
+    spin_axis: bpy.props.EnumProperty(
+        name="Spin Axis",
+        description="Axis objects tumble around. Z spins them flat like a coin, X and Y roll them over",
+        items=(
+            ('RANDOM', "Random", "A different axis per object"),
+            ('X', "X", "Roll around X"),
+            ('Y', "Y", "Roll around Y"),
+            ('Z', "Z", "Spin flat, around Z"),
+        ),
+        default='RANDOM',
+    )
+    spin_variation: bpy.props.FloatProperty(
+        name="Spin Variation",
+        description="Random spread of how far each object turns. The direction is always random",
+        default=0.5, min=0.0, max=1.0,
+    )
+
     seed: bpy.props.IntProperty(
         name="Random Seed",
         description="Change to get a different set of per-object shake phases and speeds",

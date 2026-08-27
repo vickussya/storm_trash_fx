@@ -8,8 +8,8 @@ surface), then exercises the pure logic: the driver expressions, the shake
 speed and reach, the weight curve, and the per-object phase seeding.
 
 The expressions are evaluated with only the names Blender's fast
-simple-expression evaluator exposes - sqrt, max, sin, the driver variables and
-`frame`.  If an expression evaluates here, it is on the fast path.
+simple-expression evaluator exposes - sqrt, min, max, sin, the driver
+variables and `frame`.  If an expression evaluates here, it is on the fast path.
 
 Registration, depsgraph behaviour and Bake cannot be checked this way; those
 need a real Blender session.
@@ -23,7 +23,7 @@ import types
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 #: exactly what Blender's simple-expression evaluator exposes to a driver
-DRIVER_SCOPE = {"sqrt": math.sqrt, "max": max, "sin": math.sin}
+DRIVER_SCOPE = {"sqrt": math.sqrt, "max": max, "min": min, "sin": math.sin}
 
 #: Blender refuses driver expressions longer than this
 MAX_EXPR_LEN = 256
@@ -51,6 +51,10 @@ class FakeProps(object):
     shake_reach = 1.4
     do_rattle = True
     rattle_distance = 0.05
+    do_spin = True
+    spin_turns = 0.5
+    spin_axis = 'RANDOM'
+    spin_variation = 0.5
     seed = 1
 
 
@@ -64,7 +68,8 @@ def install_stubs():
 
     bpy = types.ModuleType("bpy")
     bpy.props = types.SimpleNamespace(**{n: _prop for n in (
-        "PointerProperty", "FloatProperty", "BoolProperty", "IntProperty")})
+        "PointerProperty", "FloatProperty", "BoolProperty", "IntProperty",
+        "EnumProperty")})
     bpy.types = types.SimpleNamespace(
         PropertyGroup=_Base, Operator=_Base, Panel=_Base,
         Object=object, Scene=types.SimpleNamespace())
@@ -220,6 +225,94 @@ def check_reach(addon):
     assert lift_gate.endswith("**2.00"), "falloff 2 should append one"
 
 
+def check_spin(addon):
+    """Spin must wind on across the pass and then hold, never unwind."""
+    rig = addon.rig
+    props = FakeProps()
+    turns = 1.5
+    spin = rig.spin_expr(40.0, 90.0, turns * 2.0 * math.pi)
+    print("  %s" % spin)
+
+    def turns_at(frame):
+        return evaluate(spin, OX, OY, frame) / (2.0 * math.pi)
+
+    for f in (1, 40, 52, 65, 90, 140, 500):
+        print("  frame %3d -> %+.3f turns" % (f, turns_at(f)))
+
+    assert turns_at(1) == 0.0, "no rotation before the storm arrives"
+    assert turns_at(40) == 0.0, "no rotation at the moment it arrives"
+    assert abs(turns_at(90) - turns) < 1e-6, "full rotation by the end of the pass"
+    assert abs(turns_at(500) - turns) < 1e-6, "must HOLD, not unwind"
+    seq = [turns_at(f) for f in range(1, 200)]
+    assert all(b >= a - 1e-12 for a, b in zip(seq, seq[1:])),         "rotation must never run backwards"
+    assert abs(turns_at(65) - turns / 2.0) < 0.02, "halfway through, half turned"
+
+    # spin does not care where the storm is, only when - the window already
+    # encodes the pass, so a far-away storm position must not change it
+    assert evaluate(spin, OX, OY, 65) == evaluate(spin, OX + 500.0, OY + 500.0, 65)
+
+    # direction is randomly signed, so a pile does not turn as one
+    signs = set()
+    for i in range(12):
+        rng = rig.object_rng(1, "o%d" % i, "spin")
+        signs.add(rig.object_spin_radians(props, 1.0, rng) > 0)
+    assert signs == {True, False}, "objects must tumble both ways"
+
+    axes = set()
+    for i in range(12):
+        axes.add(rig.object_spin_axis(props, rig.object_rng(1, "o%d" % i, "spin")))
+    print("  random axis assignment covers %s" % sorted(axes))
+    assert axes == {0, 1, 2}, "Random should use all three axes"
+
+    props.spin_axis = 'Z'
+    assert rig.object_spin_axis(props, rig.object_rng(1, "a", "spin")) == 2
+
+    props.spin_turns = 0.0
+    assert rig.object_spin_radians(props, 1.0, rig.object_rng(1, "a", "spin")) == 0.0
+
+    # worst case: wobble and spin share one axis, with long coordinates and
+    # full roughness.  The octave budget is what has to give, not the limit.
+    props = FakeProps()
+    gate = rig.gate_expr(-98765.4321, 12345.6789, 1.0 / RADIUS, 2.75)
+    spin_term = rig.spin_expr(1234.0, 1299.0, -12.566371)
+    wob = rig.wobble_expr(gate, math.radians(90.0),
+                          rig.frame_frequency(8.0, FPS), 1.0,
+                          rig.object_rng(1, "worst", "shake1"),
+                          budget=rig._EXPRESSION_BUDGET - len(spin_term) - 2)
+    combined = wob + "+" + spin_term
+    print("  worst-case wobble+spin on one axis: %d chars (limit %d)"
+          % (len(combined), MAX_EXPR_LEN))
+    assert len(combined) < MAX_EXPR_LEN, combined
+    peak = max(abs(evaluate(combined, -98765.4321, 12345.6789, f))
+               for f in range(1200, 1400))
+    print("  and it still evaluates, peaking at %.3f rad" % peak)
+
+
+def check_pass_window(addon):
+    """The pass window is what makes the spin land in the right frames."""
+    pass_window = addon.measure.pass_window
+    # a storm crossing the origin from -100 to +100 over frames 1..101
+    track = [(float(f), -100.0 + 2.0 * (f - 1), 0.0) for f in range(1, 102)]
+
+    win = pass_window(track, 0.0, 0.0, 20.0)
+    print("  storm crossing the origin, reach 20 -> frames %s" % (win,))
+    assert win == (41.0, 61.0), win
+
+    off = pass_window(track, 0.0, 15.0, 20.0)
+    print("  object 15 m off the path -> frames %s (shorter window)" % (off,))
+    assert off is not None and (off[1] - off[0]) < (win[1] - win[0])
+
+    assert pass_window(track, 0.0, 500.0, 20.0) is None, "out of reach -> no spin"
+    assert pass_window([], 0.0, 0.0, 20.0) is None, "empty track -> no spin"
+
+    # a coarse track where the storm crosses inside one sample must still
+    # produce a window with width, not an instant snap
+    coarse = [(float(f), -100.0 + 25.0 * f, 0.0) for f in range(0, 9)]
+    tight = pass_window(coarse, 0.0, 0.0, 5.0)
+    print("  single-sample crossing -> frames %s" % (tight,))
+    assert tight is not None and tight[1] > tight[0], tight
+
+
 def check_weight_curve(addon):
     lightness = addon.measure.lightness
     light_factor = addon.measure.light_factor
@@ -274,6 +367,8 @@ def main():
     for section, fn in (("expressions", check_expressions),
                         ("shake speed", check_speed),
                         ("shake reach and falloff", check_reach),
+                        ("spin", check_spin),
+                        ("pass window", check_pass_window),
                         ("weight curve", check_weight_curve),
                         ("phase seeding", check_phases),
                         ("channel ownership", check_ownership)):
