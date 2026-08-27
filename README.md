@@ -40,25 +40,19 @@ Nothing in your scene changes until you press a button.
 
 ## Install
 
-**From a zip**
-
-1. Zip this repository's **contents** — the archive must have
-   [`storm_trash_fx/`](storm_trash_fx/) at its root
-2. `Edit > Preferences > Add-ons > Install from Disk...`
-3. Pick the zip
+1. On GitHub: **Code → Download ZIP**
+2. In Blender: `Edit > Preferences > Add-ons > Install from Disk...`
+3. Pick the zip you downloaded
 4. Enable **Animation: Storm Trash FX**
 
-> Don't zip the repo *folder*. An archive laid out as
-> `storm_trash_fx-main/storm_trash_fx/...` won't register — Blender looks for
-> the add-on package at the zip root, and the wrapper folder hides it. Zipping
-> just the `storm_trash_fx/` folder on its own works too.
+The add-on package *is* the repository root, so GitHub's zip drops straight in
+— no unwrapping, no rezipping. Blender will name the installed module after the
+zip's folder (`storm_trash_fx-main`); that is normal and harmless.
 
-**From the folder**
-
-Copy the [`storm_trash_fx/`](storm_trash_fx/) package folder into your Blender
-`scripts/addons/` directory and enable it in Preferences. Handy while editing:
-disabling and re-enabling the add-on reloads the submodules, so you don't have
-to restart Blender.
+**While developing**, skip the zip: symlink or copy this repo's `.py` files
+into a folder under your Blender `scripts/addons/` directory. Disabling and
+re-enabling the add-on reloads the submodules, so you don't have to restart
+Blender.
 
 ---
 
@@ -215,19 +209,20 @@ afterwards.
 
 ## Repository layout
 
+The repository root doubles as the add-on package — that is what makes the
+GitHub zip installable as-is.
+
 ```
-storm_trash_fx/
-    __init__.py     bl_info, submodule reload, register / unregister
-    channels.py     the four delta channels the add-on owns, and the only
-                    code that writes them
-    measure.py      reading the scene: size, resting position, storm
-                    underside, weight curve
-    rig.py          driver expressions and driver construction
-    props.py        panel settings, stored on the scene
-    operators.py    Apply / Clear / Bake / Auto-detect - all scene mutation
-    ui.py           the N-panel
-tools/
-    check.py        run the logic without Blender
+__init__.py     bl_info, submodule reload, register / unregister
+channels.py     the four delta channels the add-on owns, and the only code
+                that writes them
+measure.py      reading the scene: size, resting position, storm underside,
+                weight curve
+rig.py          driver expressions and driver construction
+props.py        panel settings, stored on the scene
+operators.py    Apply / Clear / Bake / Auto-detect - all scene mutation
+ui.py           the N-panel
+tools/check.py  run the logic without Blender
 ```
 
 `python tools/check.py` stubs `bpy` and `mathutils`, imports every module, and

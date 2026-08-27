@@ -11,24 +11,30 @@ manager, no dependencies beyond Blender's bundled `bpy` / `mathutils`, and no
 build step — the user zips the repo contents and installs that.
 
 ```
-storm_trash_fx/
-    __init__.py     bl_info, submodule reload, register / unregister
-    channels.py     the four delta channels the add-on owns, and the only
-                    code that writes them
-    measure.py      reading the scene: size, resting position, storm
-                    underside, weight curve
-    rig.py          driver expressions and driver construction
-    props.py        panel settings, stored on the scene
-    operators.py    Apply / Clear / Bake / Auto-detect - all scene mutation
-    ui.py           the N-panel
-tools/
-    check.py        run the logic without Blender
-README.md           user-facing documentation
-CHANGELOG.md        Keep a Changelog format, semver, mirrors bl_info["version"]
-AGENTS.md           this file
-LICENSE             GPL-3.0
-.gitignore          Python + Blender + VS Code
+__init__.py     bl_info, submodule reload, register / unregister
+channels.py     the four delta channels the add-on owns, and the only code
+                that writes them
+measure.py      reading the scene: size, resting position, storm underside,
+                weight curve
+rig.py          driver expressions and driver construction
+props.py        panel settings, stored on the scene
+operators.py    Apply / Clear / Bake / Auto-detect - all scene mutation
+ui.py           the N-panel
+tools/check.py  run the logic without Blender
+README.md       user-facing documentation
+CHANGELOG.md    Keep a Changelog format, semver, mirrors bl_info["version"]
+AGENTS.md       this file
+LICENSE         GPL-3.0
+.gitignore      Python + Blender + VS Code
 ```
+
+**The repository root is the add-on package.** That is deliberate: GitHub's
+"Download ZIP" wraps everything in a `<repo>-<branch>/` folder, and Blender
+looks for `__init__.py` at the zip root, so a nested package directory makes
+the zip silently install nothing ("Modules Installed ()"). Don't move the
+modules into a subfolder. It also means the installed module name varies
+(`storm_trash_fx-main`), so never hard-code the package name — `tools/check.py`
+loads by path for exactly this reason.
 
 The layering is one-way: `channels` and `measure` depend on nothing of ours,
 `rig` depends on `channels`, `operators` depends on all three, `ui` depends on

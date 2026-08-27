@@ -77,17 +77,39 @@ def _add_storm_vars(drv, storm):
         tgt.transform_space = 'WORLD_SPACE'
 
 
+def _strip_fcurve(fc):
+    """Clear anything on the F-curve that would remap the driver's output.
+
+    A generator modifier or a stray keyframe on a driver F-curve overrides the
+    raw driver value, so both are cleared.  Removing from a live Blender
+    collection reallocates it, which invalidates a snapshot taken with
+    ``list()`` - "Keyframe not in F-Curve" - so always remove the *current*
+    first element instead.  This is a nicety, not load-bearing: it must never
+    be able to abort an Apply, hence the blanket except.
+    """
+    try:
+        while fc.modifiers:
+            fc.modifiers.remove(fc.modifiers[0])
+    except Exception:
+        pass
+    try:
+        fc.keyframe_points.clear()
+    except AttributeError:
+        try:
+            while fc.keyframe_points:
+                fc.keyframe_points.remove(fc.keyframe_points[0])
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 def add_driver(obj, data_path, index, storm, expression):
     """Create one scripted driver, replacing whatever was on the channel."""
     channels.remove_driver(obj, data_path, index)
     channels.remove_keyframes(obj, data_path, index)
     fc = obj.driver_add(data_path, index)
-    # A generated F-curve modifier or leftover keyframes would remap the
-    # driver's output; the raw driver value is what we want.
-    for m in list(fc.modifiers):
-        fc.modifiers.remove(m)
-    for kp in list(fc.keyframe_points):
-        fc.keyframe_points.remove(kp)
+    _strip_fcurve(fc)
     fc.mute = False
     drv = fc.driver
     drv.type = 'SCRIPTED'

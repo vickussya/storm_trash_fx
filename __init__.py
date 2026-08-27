@@ -7,7 +7,8 @@ capped so its top never reaches the storm underside.
 
 Nothing in the scene changes until the user presses a button in the panel.
 
-Module map
+Module map (this package IS the repository root, so that GitHub's
+"Download ZIP" produces an archive Blender can install directly)
     channels    the four delta channels this add-on owns, and the only code
                 that writes them
     measure     reading the scene: object size, resting position, storm
@@ -22,8 +23,8 @@ Install, usage, settings reference and implementation notes: see README.md.
 
 bl_info = {
     "name": "Storm Trash FX",
-    "author": "built with Claude for Viktoria",
-    "version": (1, 1, 0),
+    "author": "vickussya",
+    "version": (1, 2, 0),
     "blender": (4, 2, 0),
     "location": "3D View > N-panel > Storm FX",
     "description": "Proximity-driven lift + shake for trash reacting to a moving storm, weighted by object size, capped below the storm.",

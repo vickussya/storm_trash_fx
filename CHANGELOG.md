@@ -4,23 +4,38 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-The version here mirrors `bl_info["version"]` in `storm_trash_fx/__init__.py`.
+The version here mirrors `bl_info["version"]` in `__init__.py`.
 
-## [Unreleased]
+## [1.2.0] - 2026-08-27
+
+### Fixed
+
+- **Apply crashed with `RuntimeError: Keyframe not in F-Curve`.** After
+  creating a driver, `add_driver` stripped any keyframes off the new F-curve by
+  iterating a `list()` snapshot and calling `remove()` on each. Removing from a
+  live Blender collection reallocates it, so every reference after the first
+  was stale. It now clears the collection in place, and the whole cleanup is
+  wrapped so this nicety can never abort an Apply again.
 
 ### Changed
 
-- **Split the single `storm_trash_fx.py` into a package.** The file had grown
-  to roughly 500 lines mixing measurement, driver construction, operators and
-  UI. It is now `storm_trash_fx/` with one concern per module - `channels`
-  (the four delta channels the add-on owns), `measure` (reading the scene),
-  `rig` (driver expressions), `props`, `operators`, `ui` - layered one-way so
-  nothing reaches back up. No behaviour changed.
-- Cross-module helpers lost their leading underscore; module-private ones kept
-  it.
+- **The repository root is now the add-on package**, so GitHub's *Code →
+  Download ZIP* archive installs in Blender as-is. The modules used to live in
+  a nested `storm_trash_fx/` folder, which meant the zip extracted to
+  `storm_trash_fx-main/` with no `__init__.py` at its root and Blender
+  installed nothing, reporting `Modules Installed ()`. The installed module is
+  named after the zip folder (`storm_trash_fx-main`); nothing depends on the
+  package name.
+- `tools/check.py` loads the add-on by path under a synthetic name rather than
+  importing it by directory name, which now varies.
+- Split the single ~500-line file into one module per concern - `channels` (the
+  four delta channels the add-on owns), `measure` (reading the scene), `rig`
+  (driver expressions), `props`, `operators`, `ui` - layered one-way so nothing
+  reaches back up. Cross-module helpers lost their leading underscore.
 - `__init__.py` reloads its submodules when the add-on is re-enabled, so edits
   take effect without restarting Blender.
 - The panel `draw()` is split into one method per section.
+- `bl_info["author"]` is now `vickussya`.
 
 ### Added
 
@@ -31,8 +46,7 @@ The version here mirrors `bl_info["version"]` in `storm_trash_fx/__init__.py`.
 ### Removed
 
 - **Running the add-on from Blender's Text Editor.** A package cannot be run as
-  a loose script. Zip the repository contents and install that, or drop the
-  `storm_trash_fx/` folder into `scripts/addons/`.
+  a loose script; install the zip instead.
 
 ## [1.1.0] - 2026-08-27
 

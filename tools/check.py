@@ -126,10 +126,30 @@ def check_ownership(addon):
     assert all(("delta_rotation_euler", a) in owned for a in (0, 1, 2))
 
 
+def load_addon():
+    """Import the add-on package that lives at the repository root.
+
+    Loaded by path under a synthetic name rather than by directory name: the
+    repo root doubles as the add-on package, so its folder is called whatever
+    the clone or GitHub zip happened to name it (`storm_trash_fx-main`, and so
+    on).  `submodule_search_locations` is what makes `from . import channels`
+    resolve.
+    """
+    import importlib.util
+
+    name = "_storm_trash_fx_under_test"
+    spec = importlib.util.spec_from_file_location(
+        name, os.path.join(ROOT, "__init__.py"),
+        submodule_search_locations=[ROOT])
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def main():
     install_stubs()
-    sys.path.insert(0, ROOT)
-    import storm_trash_fx as addon
+    addon = load_addon()
 
     print("add-on version: %s"
           % ".".join(str(n) for n in addon.bl_info["version"]))
