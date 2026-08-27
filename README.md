@@ -6,8 +6,9 @@ A Blender add-on that builds a reusable **lift + shake rig** for
 For every selected object it creates drivers so that, as a moving storm object
 passes over it, the object:
 
-* **rises** on Delta Location Z (lift), and
-* **trembles** on Delta Rotation (shake), fading in with proximity,
+* **rises** on Delta Location Z (lift),
+* **tilts and twists** on Delta Rotation (shake), fading in with proximity, and
+* **rattles** slightly sideways on Delta Location X/Y,
 
 and settles back to rest as the storm moves on. The effect is strongest right
 under the storm and fades to nothing at the edge of its reach.
@@ -87,6 +88,7 @@ the objects back at rest.
 | --- | --- | --- |
 | **Storm Object** | — | The object trash reacts to. Required. |
 | **Influence Radius** | `21.0` | Horizontal distance at which the storm starts to affect an object. |
+| **Falloff** | `2.0` | Shape of the ramp from the radius in to the storm. `1` = straight line; higher keeps the effect weak until the storm is close. |
 
 ### Ceiling (don't enter storm)
 
@@ -108,11 +110,23 @@ the objects back at rest.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | **Lift** | on | Drive Delta Location Z. |
-| **Shake** | on | Drive Delta Rotation Euler. |
-| **Shake Amount** | `12.0°` | Peak wobble for the *lightest* object. |
-| **Shake Speed** | `0.9` | How fast the trembling is. |
-| **Axes X / Y / Z** | X, Y | Which rotation axes shake. |
-| **Random Seed** | `1` | Change for a different set of per-object shake phases. |
+| **Shake** | on | Drive Delta Rotation Euler, and the horizontal rattle. |
+
+### Shake
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| **Tilt Amount** | `12.0` | Peak tilt in degrees for the lightest object, on X and Y. |
+| **Twist Amount** | `6.0` | Peak twist in degrees for the lightest object, on Z. |
+| **Axes X / Y / Z** | X, Y | Which rotation axes move. |
+| **Speed** | `1.5` | Base wobble rate in **cycles per second**, converted using the scene fps at Apply time. |
+| **Roughness** | `0.35` | How much fast detail rides on the base wobble. `0` = a clean sway, `1` = a busy rattle. |
+| **Speed Variation** | `0.3` | Random spread of wobble rate between objects, so a pile doesn't move in lockstep. |
+| **Speed by Weight** | `0.5` | How much lighter objects wobble faster than heavy ones. `0` = one rate for everything. |
+| **Shake Reach** | `1.4` | Shake radius as a multiple of *Influence Radius*. Above `1`, trash trembles before it starts to rise. |
+| **Rattle** | on | Also jitter objects horizontally, not just rotate them. |
+| **Rattle Amount** | `0.05` | Peak horizontal jitter for the lightest object, in scene units. |
+| **Random Seed** | `1` | Change for a different set of per-object phases and speeds. |
 
 ### Bake
 
@@ -141,14 +155,15 @@ operator reports how many.
 **Proximity gate.** Both effects are gated by the same term:
 
 ```
-max(0.0, 1.0 - sqrt((sx - ox)**2 + (sy - oy)**2) * (1/R)) ** 2
+max(0.0, 1.0 - sqrt((sx - ox)**2 + (sy - oy)**2) * (1/R)) ** falloff
 ```
 
 `sx` / `sy` are the storm's **world X and Y**, read through native Transform
 Channel driver variables. `ox` / `oy` are the object's resting position, baked
-into the expression as constants at Apply time. `R` is the influence radius.
-Squaring gives the smooth ramp — it eases off instead of hitting the radius
-edge with a visible kink.
+into the expression as constants at Apply time. `R` is the influence radius —
+multiplied by *Shake Reach* for the shake and rattle, which is how trash starts
+trembling before it starts to rise. *Falloff* shapes the ramp; at the default
+`2` it eases off instead of hitting the radius edge with a visible kink.
 
 The distance is **horizontal only**. The storm sits several metres above the
 scene, so measuring in 3D would mean an object directly underneath never
@@ -157,17 +172,29 @@ reaches full effect.
 **Lift driver** on `delta_location[2]` — `gate * A`, where `A` is the
 weight-scaled, ceiling-capped amplitude.
 
-**Shake driver** on each enabled `delta_rotation_euler[axis]`:
+**Shake driver** on each enabled `delta_rotation_euler[axis]`, and **rattle
+drivers** on `delta_location[0]` and `[1]` — all the same shape:
 
 ```
-gate * S * (sin(frame*F + P) + 0.5*sin(frame*F2 + P2))
+gate * A * (sin(frame*F + P) + r*sin(frame*F2 + P2) + r²*sin(frame*F3 + P3))
 ```
 
-Two sines at incommensurate frequencies give cheap pseudo-noise; `F` differs
-per axis and the phase `P` is randomised per object (derived from the object's
-name and the seed, so it's stable across re-applies) — nothing shakes in sync.
-`S` is normalised by the sine sum's peak of 1.5, so *Shake Amount* is the
-actual peak wobble in degrees.
+A base sine plus up to two quieter, faster octaves whose amplitudes fall off by
+*Roughness* (`r`). At roughness `0` it collapses to a single clean sway; at `1`
+the octaves are as loud as the base and it reads as a rattle. The octave ratios
+(2.3×, 4.7×) are deliberately not whole numbers — harmonically related octaves
+re-align into an obvious repeating pattern. `A` is divided by the sum of the
+octave amplitudes, so *Tilt Amount* is the true peak in degrees.
+
+**Speed is in cycles per second.** A driver only knows `frame`, so the scene
+frame rate is folded into `F` at Apply time — meaning **if you change the scene
+fps, re-apply**, or the shake will speed up or slow down with it. Three things
+pull each object's rate away from the panel value: *Speed by Weight* (lighter
+objects have a higher natural frequency — a can buzzes, a dumpster lumbers),
+*Speed Variation* (a random per-object spread, so a pile doesn't pulse in
+unison), and a small per-axis offset so the axes don't trace a straight line.
+Every phase and rate is derived from the object's name plus the seed, so they
+survive a re-apply unchanged.
 
 **Why it's fast — and why it isn't a Distance variable.** These expressions use
 only arithmetic, `sqrt`, `max`, `sin` and the `frame` symbol, so they run on
@@ -198,7 +225,7 @@ afterwards.
 * Applying converts objects in Quaternion or Axis-Angle rotation mode to Euler
   XYZ, preserving their current orientation, because the shake drives
   `delta_rotation_euler`.
-* The add-on only ever touches `delta_location[2]` and
+* The add-on only ever touches `delta_location[0..2]` and
   `delta_rotation_euler[0..2]`. Your regular Location/Rotation animation is
   left alone — but any *existing* drivers or keyframes on those delta channels
   are replaced.
@@ -214,7 +241,7 @@ GitHub zip installable as-is.
 
 ```
 __init__.py     bl_info, submodule reload, register / unregister
-channels.py     the four delta channels the add-on owns, and the only code
+channels.py     the six delta channels the add-on owns, and the only code
                 that writes them
 measure.py      reading the scene: size, resting position, storm underside,
                 weight curve
@@ -239,8 +266,22 @@ influence radius *horizontally* — the gate hits zero at exactly `R` metres. Al
 confirm the objects are meshes and were selected when you pressed Apply.
 
 **Objects lift but don't shake.** Shake needs an Euler rotation mode; Apply
-converts them, but check the axis toggles (Z is off by default) and that *Shake
+converts them, but check the axis toggles (Z is off by default) and that *Tilt
 Amount* isn't zero.
+
+**The shake looks like fast vibration.** Drop *Speed* — it is in cycles per
+second, so `1.5` is a slow sway and `6` is a buzz. *Roughness* at `0` removes
+the fast detail layer entirely. Also check the scene fps hasn't changed since
+you applied.
+
+**Everything shakes in unison.** Raise *Speed Variation*, and *Speed by Weight*
+if the pile has a mix of sizes.
+
+**Rotation makes objects bob up and down.** Delta rotation pivots on the object
+origin, so an origin at the object's centre swings the geometry vertically. Set
+the origin to the base (`Object > Set Origin > Origin to Geometry`, or place the
+3D cursor at the base and use *Origin to 3D Cursor*) and the same tilt reads as
+rocking on the ground instead.
 
 **Objects only twitch a little.** They're being read as heavy. Weight is
 relative to the selection, so a large object in the selection compresses

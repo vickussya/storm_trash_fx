@@ -64,17 +64,24 @@ def storm_bottom_z(props, depsgraph=None):
     return props.storm_bottom_z
 
 
-def light_factor(size, size_min, size_max, min_factor):
-    """Map size -> influence factor in ``[min_factor, 1]``.
+def lightness(size, size_min, size_max):
+    """How light this object is, relative to the selection: 1.0 .. 0.0.
 
-    Smallest object -> 1.0 (max effect), largest -> ``min_factor``.  Log scale,
+    Smallest object in the selection -> 1.0, largest -> 0.0.  Log scale,
     because trash sizes span a wide range.  Note the range is relative to the
     current selection, so the same object reacts differently depending on what
     it was applied alongside - that is intended.
+
+    Kept separate from :func:`light_factor` because amplitude and shake speed
+    read the same lightness through different curves.
     """
     if size_max <= size_min * 1.0001:
         return 1.0
     lo, hi = math.log(size_min), math.log(size_max)
     t = (hi - math.log(min(max(size, size_min), size_max))) / (hi - lo)
-    t = max(0.0, min(1.0, t))
-    return min_factor + (1.0 - min_factor) * t
+    return max(0.0, min(1.0, t))
+
+
+def light_factor(lightness_value, min_factor):
+    """Map lightness -> amplitude factor in ``[min_factor, 1]``."""
+    return min_factor + (1.0 - min_factor) * max(0.0, min(1.0, lightness_value))

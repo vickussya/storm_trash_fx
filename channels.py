@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """The channels this add-on owns, and the only code allowed to write them.
 
-Storm Trash FX touches exactly four properties on an object: Delta Location Z
-and the three Delta Rotation Euler axes.  Everything that adds, removes or
+Storm Trash FX touches exactly six properties on an object: the three Delta
+Location components (Z lifts, X and Y rattle) and the three Delta Rotation
+Euler axes.  Everything that adds, removes or
 resets one of them goes through this module, so the ownership boundary is
 visible in one place.
 """
@@ -11,10 +12,15 @@ from mathutils import Quaternion, Vector
 
 LIFT_PATH = "delta_location"
 LIFT_INDEX = 2
+#: horizontal rattle rides on the other two components of the same property
+RATTLE_PATH = "delta_location"
+RATTLE_INDICES = (0, 1)
 SHAKE_PATH = "delta_rotation_euler"
 
 #: Every (data_path, array_index) this add-on is allowed to write.
 OWNED_CHANNELS = (
+    (RATTLE_PATH, 0),
+    (RATTLE_PATH, 1),
     (LIFT_PATH, LIFT_INDEX),
     (SHAKE_PATH, 0),
     (SHAKE_PATH, 1),

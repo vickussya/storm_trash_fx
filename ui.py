@@ -19,6 +19,7 @@ class STORMFX_PT_panel(bpy.types.Panel):
         self._draw_ceiling(layout, props)
         self._draw_weight(layout, props)
         self._draw_effect(layout, props)
+        self._draw_shake(layout, props)
         self._draw_actions(layout)
         self._draw_bake(layout, props)
 
@@ -30,6 +31,7 @@ class STORMFX_PT_panel(bpy.types.Panel):
         row.prop(props, "storm_object")
         row.operator("stormfx.pick_default_storm", text="", icon='VIEWZOOM')
         col.prop(props, "radius")
+        col.prop(props, "falloff")
         if props.storm_object is None:
             layout.label(text="Pick a Storm Object to begin", icon='ERROR')
 
@@ -54,15 +56,34 @@ class STORMFX_PT_panel(bpy.types.Panel):
         row = box.row(align=True)
         row.prop(props, "do_lift", toggle=True)
         row.prop(props, "do_shake", toggle=True)
+
+    def _draw_shake(self, layout, props):
         if not props.do_shake:
             return
-        box.prop(props, "shake_degrees")
-        box.prop(props, "shake_speed")
-        row = box.row(align=True)
+        box = layout.box()
+        box.label(text="Shake", icon='FORCE_HARMONIC')
+
+        col = box.column(align=True)
+        col.prop(props, "tilt_degrees")
+        col.prop(props, "twist_degrees")
+        row = col.row(align=True)
         row.label(text="Axes:")
         row.prop(props, "shake_x", toggle=True)
         row.prop(props, "shake_y", toggle=True)
         row.prop(props, "shake_z", toggle=True)
+
+        col = box.column(align=True)
+        col.prop(props, "shake_speed")
+        col.prop(props, "shake_roughness", slider=True)
+        col.prop(props, "shake_speed_variation", slider=True)
+        col.prop(props, "shake_speed_by_weight", slider=True)
+        col.prop(props, "shake_reach")
+
+        sub = box.box()
+        sub.prop(props, "do_rattle")
+        if props.do_rattle:
+            sub.prop(props, "rattle_distance")
+
         box.prop(props, "seed")
 
     def _draw_actions(self, layout):

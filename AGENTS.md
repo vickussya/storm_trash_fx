@@ -12,7 +12,7 @@ build step — the user zips the repo contents and installs that.
 
 ```
 __init__.py     bl_info, submodule reload, register / unregister
-channels.py     the four delta channels the add-on owns, and the only code
+channels.py     the six delta channels the add-on owns, and the only code
                 that writes them
 measure.py      reading the scene: size, resting position, storm underside,
                 weight curve
@@ -37,8 +37,8 @@ modules into a subfolder. It also means the installed module name varies
 loads by path for exactly this reason.
 
 The layering is one-way: `channels` and `measure` depend on nothing of ours,
-`rig` depends on `channels`, `operators` depends on all three, `ui` depends on
-none of them (it goes through operator ids). Keep it that way — if a helper
+`rig` depends on both, `operators` depends on all three, `ui` depends on none
+of them (it goes through operator ids). Keep it that way — if a helper
 needs to reach back up a layer, it is in the wrong module.
 
 New modules go in the package and export a `CLASSES` tuple if they define
@@ -75,9 +75,9 @@ These are hard rules. When in doubt, stop and ask.
 
 ### Stay inside the channels this add-on owns
 
-* The add-on may only write `delta_location[2]` and
-  `delta_rotation_euler[0..2]`, plus `rotation_mode` when it must switch an
-  object to Euler.
+* The add-on may only write `delta_location[0..2]` (Z lifts, X and Y rattle)
+  and `delta_rotation_euler[0..2]`, plus `rotation_mode` when it must switch an
+  object to Euler. `channels.OWNED_CHANNELS` is the list; keep it in sync.
 * **Never** touch `location`, `rotation_euler`, `rotation_quaternion`, `scale`,
   modifiers, materials, or collections.
 * Never bulk-delete animation data. `driver_remove` and keyframe removal must
@@ -218,7 +218,13 @@ change is verified.
 * Weight is **relative to the current selection**, so the same object reacts
   differently depending on what it was applied alongside. That is intended.
 * **Driver expressions cap at 256 characters.** The gate is ~75 characters and
-  is inlined into every driver; check the length before adding terms.
+  is inlined into every driver; a three-octave shake lands around 180. That is
+  why `rig.oscillator_expr` counts its octaves against a budget instead of
+  emitting them unconditionally. Check the length before adding terms.
+* **Driver expressions cannot read the scene frame rate.** Anything expressed
+  in seconds has to be converted to per-frame constants at Apply time, which
+  means the rig goes stale if the user changes the fps. Say so in the tooltip
+  for any control you add in real-world time units.
 * `channels.ensure_euler` converts the orientation *before* switching
   `rotation_mode` —
   flipping the mode bare makes the object jump.

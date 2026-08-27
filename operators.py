@@ -18,7 +18,8 @@ class STORMFX_OT_apply(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        props = context.scene.storm_fx
+        scene = context.scene
+        props = scene.storm_fx
         storm = props.storm_object
         if storm is None:
             self.report({'ERROR'}, "Set a Storm Object first.")
@@ -43,23 +44,28 @@ class STORMFX_OT_apply(bpy.types.Operator):
         size_min, size_max = min(sizes), max(sizes)
         bottom = measure.storm_bottom_z(props, depsgraph)
 
+        # the shake speed is in cycles per second, but a driver only knows
+        # `frame`, so the scene frame rate is folded in here
+        render = scene.render
+        fps = render.fps / max(1e-6, render.fps_base)
+
         done = 0
         capped = 0
         for o in targets:
             cx, cy, top_z, size = stats[o]
-            factor = measure.light_factor(size, size_min, size_max, props.min_factor)
+            lightness = measure.lightness(size, size_min, size_max)
             ceiling = (bottom - props.ceiling_margin) - top_z
             if ceiling <= 0.0:
                 # already at or above the ceiling: shake only, no lift
                 ceiling = 0.0
                 if props.do_lift:
                     capped += 1
-            rig.apply_to_object(o, storm, props, factor, (cx, cy), ceiling)
+            rig.apply_to_object(o, storm, props, lightness, (cx, cy), ceiling, fps)
             o.update_tag()
             done += 1
 
         # force a depsgraph relations rebuild so the new drivers evaluate now
-        context.scene.frame_set(context.scene.frame_current)
+        scene.frame_set(scene.frame_current)
 
         msg = "Storm FX applied to {} object(s)".format(done)
         if capped:

@@ -20,6 +20,11 @@ class StormFXProps(bpy.types.PropertyGroup):
         description="Horizontal distance at which the storm starts to affect an object",
         default=21.0, min=0.001, soft_max=100.0,
     )
+    falloff: bpy.props.FloatProperty(
+        name="Falloff",
+        description="Shape of the ramp from the influence radius in to the storm. 1 = straight line, higher = the effect stays weak until the storm is close",
+        default=2.0, min=0.25, soft_max=4.0,
+    )
 
     # ---- ceiling -----------------------------------------------------------
     storm_bottom_object: bpy.props.PointerProperty(
@@ -53,22 +58,64 @@ class StormFXProps(bpy.types.PropertyGroup):
     # ---- effect ------------------------------------------------------------
     do_lift: bpy.props.BoolProperty(name="Lift", default=True)
     do_shake: bpy.props.BoolProperty(name="Shake", default=True)
-    shake_degrees: bpy.props.FloatProperty(
-        name="Shake Amount",
-        description="Peak wobble in degrees for the lightest object",
+
+    # ---- shake: how far it throws -----------------------------------------
+    tilt_degrees: bpy.props.FloatProperty(
+        name="Tilt Amount",
+        description="Peak tilt in degrees for the lightest object, on the X and Y axes",
         default=12.0, min=0.0, soft_max=90.0,
     )
-    shake_speed: bpy.props.FloatProperty(
-        name="Shake Speed",
-        description="How fast the trembling is (higher = faster)",
-        default=0.9, min=0.0, soft_max=10.0,
+    twist_degrees: bpy.props.FloatProperty(
+        name="Twist Amount",
+        description="Peak twist in degrees for the lightest object, on the Z axis",
+        default=6.0, min=0.0, soft_max=90.0,
     )
     shake_x: bpy.props.BoolProperty(name="X", default=True)
     shake_y: bpy.props.BoolProperty(name="Y", default=True)
     shake_z: bpy.props.BoolProperty(name="Z", default=False)
+
+    # ---- shake: how it moves ----------------------------------------------
+    shake_speed: bpy.props.FloatProperty(
+        name="Speed",
+        description="Base wobble rate in cycles per second. Converted using the scene frame rate when you Apply, so re-apply if you change the fps",
+        default=1.5, min=0.0, soft_max=12.0,
+    )
+    shake_roughness: bpy.props.FloatProperty(
+        name="Roughness",
+        description="How much fast detail rides on the base wobble. 0 = a clean sway, 1 = a busy rattle",
+        default=0.35, min=0.0, max=1.0,
+    )
+    shake_speed_variation: bpy.props.FloatProperty(
+        name="Speed Variation",
+        description="Random spread of wobble rate between objects, so a pile does not move in lockstep",
+        default=0.3, min=0.0, max=1.0,
+    )
+    shake_speed_by_weight: bpy.props.FloatProperty(
+        name="Speed by Weight",
+        description="How much lighter objects wobble faster than heavy ones. 0 = everything at the same rate",
+        default=0.5, min=0.0, max=1.0,
+    )
+    shake_reach: bpy.props.FloatProperty(
+        name="Shake Reach",
+        description="Shake radius as a multiple of the Influence Radius. Above 1 the trash starts trembling before it starts to rise",
+        default=1.4, min=0.01, soft_max=3.0,
+    )
+
+    # ---- shake: positional rattle ------------------------------------------
+    do_rattle: bpy.props.BoolProperty(
+        name="Rattle",
+        description="Also jitter objects horizontally, not just rotate them",
+        default=True,
+    )
+    rattle_distance: bpy.props.FloatProperty(
+        name="Rattle Amount",
+        description="Peak horizontal jitter for the lightest object, in scene units",
+        default=0.05, min=0.0, soft_max=1.0, subtype='DISTANCE',
+    )
+
     seed: bpy.props.IntProperty(
         name="Random Seed",
-        description="Change to get a different set of per-object shake phases",
+        description="Change to get a different set of per-object shake phases and speeds",
         default=1,
     )
 

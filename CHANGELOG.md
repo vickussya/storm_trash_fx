@@ -6,6 +6,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here mirrors `bl_info["version"]` in `__init__.py`.
 
+## [1.3.0] - 2026-08-27
+
+Shake polish. The old shake read as fast vibration rather than wind, and had
+one speed control for the whole scene.
+
+### Fixed
+
+- **Shake Speed was radians per frame, not a rate.** At the default `0.9` the
+  base wobble cycled every ~7 frames and the detail layer every ~3 - a 3-8 Hz
+  buzz at 24fps, which is why objects appeared to judder up and down. **Speed
+  is now in cycles per second**, converted using the scene frame rate at Apply
+  time, and defaults to `1.5`. Note the frame rate is baked into the driver, so
+  changing the scene fps means re-applying.
+
+### Added
+
+- **Rattle** - small horizontal jitter on Delta Location X and Y, on by
+  default, with its own *Rattle Amount*. The add-on now owns six channels
+  rather than four; Clear and Bake cover the new ones.
+- **Roughness** - how much fast detail rides on the base wobble. `0` is a clean
+  sway, `1` a busy rattle. Replaces the fixed second sine with up to two
+  octaves at deliberately non-integer ratios (2.3x, 4.7x), so the motion does
+  not settle into an obvious repeat.
+- **Speed Variation** - random per-object spread of wobble rate, so a pile
+  stops moving in lockstep. Previously only the phase varied, which still left
+  everything pulsing at one frequency.
+- **Speed by Weight** - lighter objects wobble faster than heavy ones, the way
+  a smaller object has a higher natural frequency. A can buzzes, a dumpster
+  lumbers.
+- **Shake Reach** - shake radius as a multiple of the influence radius,
+  defaulting to `1.4`, so trash trembles before it starts to rise.
+- **Twist Amount** - separate peak for the Z axis, so twist can be dialled
+  independently of tilt. *Shake Amount* is renamed **Tilt Amount** and now
+  covers X and Y only.
+- **Falloff** - shapes the proximity ramp for both lift and shake. `1` is a
+  straight line; the previous fixed square is the default `2`.
+
+### Changed
+
+- Shake and rattle phases come from separate per-object random streams, so the
+  rotation and the jitter are not locked together.
+- `measure.light_factor` is split into `lightness` (1.0 for the smallest object
+  in the selection, 0.0 for the largest) and `light_factor` (lightness mapped
+  through *Heaviest Effect*), because amplitude and speed read the same
+  lightness through different curves.
+- The panel has a dedicated **Shake** section.
+- `tools/check.py` covers the new behaviour: that Speed tracks the frame rate,
+  that lighter objects come out faster, that objects do not share a rate, that
+  shake outreaches lift, and that the octave sum still peaks at exactly *Tilt
+  Amount*.
+
 ## [1.2.0] - 2026-08-27
 
 ### Fixed

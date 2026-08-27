@@ -24,7 +24,7 @@ Install, usage, settings reference and implementation notes: see README.md.
 bl_info = {
     "name": "Storm Trash FX",
     "author": "vickussya",
-    "version": (1, 2, 0),
+    "version": (1, 3, 0),
     "blender": (4, 2, 0),
     "location": "3D View > N-panel > Storm FX",
     "description": "Proximity-driven lift + shake for trash reacting to a moving storm, weighted by object size, capped below the storm.",
