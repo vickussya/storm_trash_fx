@@ -6,6 +6,51 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version here mirrors `bl_info["version"]` in `__init__.py`.
 
+## [1.5.0] - 2026-08-27
+
+Both faults reported against 1.4.0 came from the same place: delta rotation
+pivots on the object's **origin**, not its geometry.
+
+### Fixed
+
+- **Spin threw objects in an arc instead of turning them in place.** An object
+  whose origin is not at its centre does not spin - it swings around that
+  point, which is what made the pile look like it was caught in a tornado.
+  *Spin Axis* now defaults to **Auto**, which picks per object the axis most
+  aligned with the origin-to-centre offset. Rotating about that axis leaves the
+  centre where it is, so trash with a base-level origin (the asset-library
+  norm) spins flat and in place, for nothing. 1.4.0 defaulted to Random, so two
+  objects in three were thrown in an arc.
+- **Objects were left hanging in the air, or pushed through the floor.** The
+  1.4.0 spin accumulated and *held* its final rotation, and with an off-centre
+  origin that held rotation was also a permanent displacement. Spin is now
+  gated like the lift and the shake: it winds on as the storm nears and unwinds
+  as it leaves, so every object finishes exactly where it started. Lift itself
+  was never the culprit - it is `gate * amplitude`, both non-negative, and
+  always returned to zero.
+- Apply reports how many selected objects still have off-centre origins and how
+  far the worst one will swing, and warns when any of them carry rigid body
+  physics - the delta channels stack on top of the simulation, which knows
+  nothing about them.
+
+### Added
+
+- **Centre Origins on Selected** - moves each origin to the centre of its
+  geometry so rotation pivots in place. Nothing moves on screen and it is
+  undoable. Skips linked objects and objects sharing mesh data, which Blender
+  will not re-origin, and says how many it skipped: duplicated library assets
+  usually share a mesh, so expect it to skip most of a scattered pile. That is
+  why Auto, not this button, is the primary fix.
+- **Spin by Weight** - how much more the small pieces turn than the big ones,
+  default `0.8`. At `1` the largest object in the selection does not spin.
+
+### Changed
+
+- *Spin Turns* is now the peak rotation reached under the storm rather than a
+  total wound up across the pass, and defaults to `0.35`.
+- Apply no longer steps through the frame range: the pass-window sampling that
+  the accumulating spin needed is gone with it.
+
 ## [1.4.0] - 2026-08-27
 
 ### Added

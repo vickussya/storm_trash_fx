@@ -88,8 +88,10 @@ class STORMFX_PT_panel(bpy.types.Panel):
         sub.prop(props, "do_spin")
         if props.do_spin:
             sub.prop(props, "spin_turns")
+            sub.prop(props, "spin_by_weight", slider=True)
             sub.prop(props, "spin_axis")
             sub.prop(props, "spin_variation", slider=True)
+            sub.operator("stormfx.center_origins", icon='OBJECT_ORIGIN')
 
         box.prop(props, "seed")
 

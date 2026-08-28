@@ -221,6 +221,16 @@ change is verified.
   is inlined into every driver; a three-octave shake lands around 180. That is
   why `rig.oscillator_expr` counts its octaves against a budget instead of
   emitting them unconditionally. Check the length before adding terms.
+* **Delta rotation pivots on the object ORIGIN, not its geometry.** An object
+  whose origin is off its centre swings in an arc instead of turning in place -
+  the bigger the rotation, the worse. Correcting it in the expression needs
+  `sin` and `cos` of the gate on every channel and does not fit the character
+  limit, so the spin picks the axis most aligned with the origin-to-centre
+  offset instead (`measure.best_spin_axis`), which leaves the centre fixed.
+  Any new large rotation must respect the same constraint.
+* **Every effect must return to rest when the storm leaves.** Objects stranded
+  mid-air was the 1.4.0 bug, and it came from a rotation that held its final
+  value. Unless the user explicitly asks otherwise, gate everything.
 * **Drivers are stateless.** A driver is a pure function of `frame` and its
   variables; it cannot integrate, accumulate, or remember the previous frame.
   Anything that has to build up and stay - the spin - must be precomputed into

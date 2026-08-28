@@ -8,7 +8,7 @@ passes over it, the object:
 
 * **rises** on Delta Location Z (lift),
 * **tilts and twists** on Delta Rotation (shake), fading in with proximity,
-* **tumbles**, keeping the orientation the storm leaves it in, and
+* **turns** as the storm passes, and
 * **rattles** slightly sideways on Delta Location X/Y,
 
 and settles back to rest as the storm moves on. The effect is strongest right
@@ -127,9 +127,10 @@ the objects back at rest.
 | **Shake Reach** | `1.4` | Shake radius as a multiple of *Influence Radius*. Above `1`, trash trembles before it starts to rise. |
 | **Rattle** | on | Also jitter objects horizontally, not just rotate them. |
 | **Rattle Amount** | `0.05` | Peak horizontal jitter for the lightest object, in scene units. |
-| **Spin** | on | Let objects tumble as the storm passes, keeping the orientation they're left in. |
-| **Spin Turns** | `0.5` | Full rotations the lightest object makes while the storm passes it. |
-| **Spin Axis** | Random | Axis objects tumble around. `Z` spins them flat like a coin, `X`/`Y` roll them over. |
+| **Spin** | on | Turn objects as the storm passes. Winds on and unwinds again, like everything else. |
+| **Spin Turns** | `0.35` | Peak rotation the lightest object reaches under the storm, in full turns. |
+| **Spin by Weight** | `0.8` | How much more the small pieces turn than the big ones. At `1` the largest doesn't spin. |
+| **Spin Axis** | Auto | `Auto` picks, per object, the axis that spins it most nearly in place. Or lock to `X`/`Y`/`Z`/`Random`. |
 | **Spin Variation** | `0.5` | Random spread of how far each object turns. Direction is always random. |
 | **Random Seed** | `1` | Change for a different set of per-object phases and speeds. |
 
@@ -191,24 +192,25 @@ the octaves are as loud as the base and it reads as a rattle. The octave ratios
 re-align into an obvious repeating pattern. `A` is divided by the sum of the
 octave amplitudes, so *Tilt Amount* is the true peak in degrees.
 
-**Spin is the one thing that isn't an oscillation.** A driver has no memory —
-it is a pure function of `frame` and where the storm is *right now* — so an
-accumulating rotation cannot be integrated from the proximity gate. Gating
-`rate * frame` would wind an object up on the way in and unwind it on the way
-out, landing it back where it started. Instead, Apply samples the storm's path
-across the scene frame range, finds the frames during which it comes within
-reach of each object, and emits a ramp that clamps at both ends:
+**Spin, and why the pivot matters.** Spin is gated exactly like the lift: it
+winds on as the storm nears and unwinds as it leaves, so every object finishes
+where it started. Amount is scaled by *Spin by Weight*, so small pieces whip
+round and heavy ones barely turn, and the direction is randomly signed.
 
-```
-min(1.0, max(0.0, (frame - frame_in) * (1/span))) * total_radians
-```
+The catch is the pivot. Delta rotation turns an object about its **origin**, not
+its geometry, so an object whose origin sits away from its centre doesn't spin
+— it *swings in an arc* around that point. At 12° of tilt that reads as shake;
+at half a turn it throws the object across the scene and under the floor.
 
-Zero before the pass, winding on through it, and holding afterwards — so the
-pile settles at new angles, as if it had actually been thrown about. Direction
-is randomly signed per object and the amount is weight-scaled, so light pieces
-tumble and heavy ones barely turn. This is why Apply steps through the frame
-range when Spin is on, and why **spin timing goes stale if you re-time the
-storm** — re-apply.
+Rather than correct that in the expression — which needs `sin` and `cos` of the
+gate on every channel and does not fit the 256-character driver limit alongside
+the shake — *Spin Axis* defaults to **Auto**, which sidesteps it: rotating about
+the axis most aligned with the origin-to-centre offset leaves that centre
+fixed. Trash with a base-level origin, which is what asset libraries ship, gets
+Z and spins flat in place, at no cost. Apply tells you how many objects still
+have a meaningful swing, and **Centre Origins on Selected** fixes them properly
+where Blender allows it — it can't re-origin linked objects or ones sharing
+mesh data, which duplicated library assets usually do.
 
 **Speed is in cycles per second.** A driver only knows `frame`, so the scene
 frame rate is folded into `F` at Apply time — meaning **if you change the scene
@@ -301,13 +303,20 @@ you applied.
 **Everything shakes in unison.** Raise *Speed Variation*, and *Speed by Weight*
 if the pile has a mix of sizes.
 
-**Nothing spins.** Apply reports *"no spin — the storm never passes within
-reach"* when the storm's path never brings it within *Influence Radius* x
-*Shake Reach* of any selected object. Check the storm is actually animated
-across the scene frame range, and that the range covers the pass.
+**Objects swing in an arc instead of spinning in place.** Their origins aren't
+at their centres — delta rotation pivots on the origin. Leave *Spin Axis* on
+`Auto`, press **Centre Origins on Selected** where Blender allows it, or lower
+*Spin Turns*. Apply reports how far the worst offender will swing.
 
-**Spin happens at the wrong time.** The pass window is baked at Apply time from
-the storm's path. Re-time or move the storm and you need to re-apply.
+**Objects pass through the floor.** A long object turning in place still dips a
+corner below its centre. Lower *Spin Turns*, or raise the lift so it's airborne
+while it turns. The add-on has no collision awareness — it drives transforms,
+it doesn't simulate.
+
+**The trash has rigid body physics.** The simulation writes to Location and
+Rotation; this add-on writes to the Delta channels, which stack on top without
+the sim knowing. They will fight. Apply warns when it sees rigid bodies on the
+selection.
 
 **Rotation makes objects bob up and down.** Delta rotation pivots on the object
 origin, so an origin at the object's centre swings the geometry vertically. Set

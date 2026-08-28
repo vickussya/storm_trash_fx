@@ -87,58 +87,56 @@ def light_factor(lightness_value, min_factor):
     return min_factor + (1.0 - min_factor) * max(0.0, min(1.0, lightness_value))
 
 
-def storm_track(scene, storm, depsgraph_get=None, max_samples=120):
-    """Sample the storm's world XY across the scene frame range.
+def origin_offset(obj, depsgraph=None):
+    """Vector from the object's origin to its geometry centre, in parent space.
 
-    Used to work out when the storm passes each object, which is what lets the
-    spin accumulate and then hold - a driver is a pure function of `frame` and
-    the storm's current position, so it has no memory of its own.
+    This is the lever arm that turns a rotation into a swing.  Delta rotation
+    pivots on the origin, so an object whose origin is not at its centre does
+    not spin in place - it arcs around that point, which is what makes a pile
+    look like it is caught in a tornado.
 
-    Steps the scene, which is not free, so only call it when spin is enabled.
-    The current frame is restored afterwards.
+    Returned in parent space because that is where the delta channels live.
     """
-    f0, f1 = scene.frame_start, scene.frame_end
-    if f1 < f0:
-        f0, f1 = f1, f0
-    step = max(1, int(math.ceil((f1 - f0 + 1) / float(max(1, max_samples)))))
-    original = scene.frame_current
-    track = []
+    ob = obj
+    if depsgraph is not None:
+        try:
+            ob = obj.evaluated_get(depsgraph)
+        except Exception:
+            ob = obj
+    corners = [Vector(c) for c in ob.bound_box]          # local space
+    if not corners:
+        return Vector((0.0, 0.0, 0.0))
+    xs = [c.x for c in corners]
+    ys = [c.y for c in corners]
+    zs = [c.z for c in corners]
+    centre = Vector(((max(xs) + min(xs)) * 0.5,
+                     (max(ys) + min(ys)) * 0.5,
+                     (max(zs) + min(zs)) * 0.5))
     try:
-        frames = list(range(f0, f1 + 1, step))
-        if frames and frames[-1] != f1:
-            frames.append(f1)
-        for f in frames:
-            scene.frame_set(f)
-            ob = storm
-            if depsgraph_get is not None:
-                try:
-                    ob = storm.evaluated_get(depsgraph_get())
-                except Exception:
-                    ob = storm
-            p = ob.matrix_world.translation
-            track.append((float(f), p.x, p.y))
-    finally:
-        scene.frame_set(original)
-    return track
+        return obj.matrix_basis.to_3x3() @ centre
+    except Exception:
+        return centre
 
 
-def pass_window(track, cx, cy, reach):
-    """``(first_frame, last_frame)`` the storm spends within ``reach`` of a point.
+def best_spin_axis(offset):
+    """The parent-space axis that a rotation can use without swinging much.
 
-    ``None`` if it never comes close enough.  Widened to the track's sampling
-    step when the storm crosses in a single sample, so a fast pass still gets a
-    window to spin over rather than an instant snap.
+    Rotating about an axis keeps the component of the offset that lies *along*
+    that axis fixed and swings the rest, so the axis most aligned with the
+    origin-to-centre offset is the one that moves the object least.  For trash
+    whose origin sits at its base - the asset-library norm - that is Z, and the
+    object spins flat, in place, for free.
     """
-    if not track:
-        return None
-    limit = reach * reach
-    inside = [f for (f, x, y) in track
-              if (x - cx) ** 2 + (y - cy) ** 2 <= limit]
-    if not inside:
-        return None
-    first, last = min(inside), max(inside)
-    step = (track[1][0] - track[0][0]) if len(track) > 1 else 1.0
-    if last - first < step:
-        half = max(step, 1.0) * 0.5
-        first, last = first - half, last + half
-    return (first, last)
+    values = (abs(offset[0]), abs(offset[1]), abs(offset[2]))
+    return values.index(max(values))
+
+
+def spin_swing(offset, axis):
+    """How far a full half-turn about `axis` would throw the geometry centre.
+
+    Zero when the offset lies along the axis.  Reported at Apply time so the
+    artist finds out before the render does.
+    """
+    perp = [offset[0], offset[1], offset[2]]
+    perp[axis] = 0.0
+    return 2.0 * math.sqrt(perp[0] ** 2 + perp[1] ** 2 + perp[2] ** 2)

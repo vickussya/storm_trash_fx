@@ -121,19 +121,25 @@ class StormFXProps(bpy.types.PropertyGroup):
     )
     spin_turns: bpy.props.FloatProperty(
         name="Spin Turns",
-        description="Full rotations the lightest object makes while the storm passes it. 0.25 is a quarter turn",
-        default=0.5, min=0.0, soft_max=10.0,
+        description="Peak rotation the lightest object reaches under the storm, in full turns. It winds on as the storm nears and unwinds as it leaves",
+        default=0.35, min=0.0, soft_max=5.0,
+    )
+    spin_by_weight: bpy.props.FloatProperty(
+        name="Spin by Weight",
+        description="How much more the small pieces spin than the big ones. At 1 the largest object in the selection does not spin at all",
+        default=0.8, min=0.0, max=1.0,
     )
     spin_axis: bpy.props.EnumProperty(
         name="Spin Axis",
-        description="Axis objects tumble around. Z spins them flat like a coin, X and Y roll them over",
+        description="Axis objects turn around. Z spins them flat like a coin, X and Y roll them over. Auto picks whichever swings each object least",
         items=(
+            ('AUTO', "Auto", "Per object, the axis that spins it most nearly in place given where its origin sits"),
             ('RANDOM', "Random", "A different axis per object"),
             ('X', "X", "Roll around X"),
             ('Y', "Y", "Roll around Y"),
             ('Z', "Z", "Spin flat, around Z"),
         ),
-        default='RANDOM',
+        default='AUTO',
     )
     spin_variation: bpy.props.FloatProperty(
         name="Spin Variation",

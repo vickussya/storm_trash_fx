@@ -52,8 +52,9 @@ class FakeProps(object):
     do_rattle = True
     rattle_distance = 0.05
     do_spin = True
-    spin_turns = 0.5
-    spin_axis = 'RANDOM'
+    spin_turns = 0.35
+    spin_by_weight = 0.8
+    spin_axis = 'AUTO'
     spin_variation = 0.5
     seed = 1
 
@@ -226,91 +227,88 @@ def check_reach(addon):
 
 
 def check_spin(addon):
-    """Spin must wind on across the pass and then hold, never unwind."""
+    """Spin must wind on with proximity and unwind again - nothing stranded."""
     rig = addon.rig
     props = FakeProps()
-    turns = 1.5
-    spin = rig.spin_expr(40.0, 90.0, turns * 2.0 * math.pi)
-    print("  %s" % spin)
+    gate = rig.gate_expr(OX, OY, 1.0 / RADIUS, props.falloff)
+    spin = rig.spin_expr(gate, 0.35 * 2.0 * math.pi)
 
-    def turns_at(frame):
-        return evaluate(spin, OX, OY, frame) / (2.0 * math.pi)
+    def turns_at(distance):
+        return evaluate(spin, OX + distance, OY) / (2.0 * math.pi)
 
-    for f in (1, 40, 52, 65, 90, 140, 500):
-        print("  frame %3d -> %+.3f turns" % (f, turns_at(f)))
+    for d in (0.0, 5.0, 10.5, 20.0, 21.0, 60.0):
+        print("  storm %5.1f m away -> %+.3f turns" % (d, turns_at(d)))
 
-    assert turns_at(1) == 0.0, "no rotation before the storm arrives"
-    assert turns_at(40) == 0.0, "no rotation at the moment it arrives"
-    assert abs(turns_at(90) - turns) < 1e-6, "full rotation by the end of the pass"
-    assert abs(turns_at(500) - turns) < 1e-6, "must HOLD, not unwind"
-    seq = [turns_at(f) for f in range(1, 200)]
-    assert all(b >= a - 1e-12 for a, b in zip(seq, seq[1:])),         "rotation must never run backwards"
-    assert abs(turns_at(65) - turns / 2.0) < 0.02, "halfway through, half turned"
+    assert abs(turns_at(0.0) - 0.35) < 1e-6, "peak turn under the storm"
+    assert turns_at(RADIUS) == 0.0, "back to rest at the influence radius"
+    assert turns_at(60.0) == 0.0, "MUST return to rest once the storm has gone"
+    # this is the 1.4.0 bug: an accumulating spin left objects turned, and with
+    # an off-centre origin that meant left hanging in the air
+    assert turns_at(200.0) == 0.0, "must not hold a rotation after the pass"
+    seq = [turns_at(d) for d in range(60, 0, -1)]
+    assert all(b >= a - 1e-12 for a, b in zip(seq, seq[1:])),         "must wind on monotonically as the storm approaches"
+    assert evaluate(spin, OX, OY, 1) == evaluate(spin, OX, OY, 900),         "spin follows the storm, not the clock"
 
-    # spin does not care where the storm is, only when - the window already
-    # encodes the pass, so a far-away storm position must not change it
-    assert evaluate(spin, OX, OY, 65) == evaluate(spin, OX + 500.0, OY + 500.0, 65)
+    # weight curve: the small pieces whip round, the big ones barely turn
+    light = abs(rig.object_spin_radians(props, 1.0, rig.object_rng(1, "a", "spin")))
+    heavy = abs(rig.object_spin_radians(props, 0.0, rig.object_rng(1, "a", "spin")))
+    print("  lightest %.3f turns vs heaviest %.3f turns"
+          % (light / (2 * math.pi), heavy / (2 * math.pi)))
+    assert light > heavy * 3.0, "small objects must spin far more"
 
-    # direction is randomly signed, so a pile does not turn as one
+    props.spin_by_weight = 1.0
+    assert rig.object_spin_radians(props, 0.0, rig.object_rng(1, "a", "spin")) == 0.0,         "at full Spin by Weight the biggest object must not spin"
+    props.spin_by_weight = 0.0
+    even_light = abs(rig.object_spin_radians(props, 1.0, rig.object_rng(1, "a", "spin")))
+    even_heavy = abs(rig.object_spin_radians(props, 0.0, rig.object_rng(1, "a", "spin")))
+    assert even_light == even_heavy, "at 0 the weight must not matter"
+
+    props = FakeProps()
     signs = set()
     for i in range(12):
-        rng = rig.object_rng(1, "o%d" % i, "spin")
-        signs.add(rig.object_spin_radians(props, 1.0, rng) > 0)
-    assert signs == {True, False}, "objects must tumble both ways"
-
-    axes = set()
-    for i in range(12):
-        axes.add(rig.object_spin_axis(props, rig.object_rng(1, "o%d" % i, "spin")))
-    print("  random axis assignment covers %s" % sorted(axes))
-    assert axes == {0, 1, 2}, "Random should use all three axes"
-
-    props.spin_axis = 'Z'
-    assert rig.object_spin_axis(props, rig.object_rng(1, "a", "spin")) == 2
+        signs.add(rig.object_spin_radians(
+            props, 1.0, rig.object_rng(1, "o%d" % i, "spin")) > 0)
+    assert signs == {True, False}, "objects must turn both ways"
 
     props.spin_turns = 0.0
     assert rig.object_spin_radians(props, 1.0, rig.object_rng(1, "a", "spin")) == 0.0
 
-    # worst case: wobble and spin share one axis, with long coordinates and
-    # full roughness.  The octave budget is what has to give, not the limit.
+
+def check_spin_pivot(addon):
+    """Rotation pivots on the origin, so the axis choice decides the swing."""
+    measure = addon.measure
+    rig = addon.rig
     props = FakeProps()
-    gate = rig.gate_expr(-98765.4321, 12345.6789, 1.0 / RADIUS, 2.75)
-    spin_term = rig.spin_expr(1234.0, 1299.0, -12.566371)
-    wob = rig.wobble_expr(gate, math.radians(90.0),
-                          rig.frame_frequency(8.0, FPS), 1.0,
-                          rig.object_rng(1, "worst", "shake1"),
-                          budget=rig._EXPRESSION_BUDGET - len(spin_term) - 2)
-    combined = wob + "+" + spin_term
-    print("  worst-case wobble+spin on one axis: %d chars (limit %d)"
-          % (len(combined), MAX_EXPR_LEN))
-    assert len(combined) < MAX_EXPR_LEN, combined
-    peak = max(abs(evaluate(combined, -98765.4321, 12345.6789, f))
-               for f in range(1200, 1400))
-    print("  and it still evaluates, peaking at %.3f rad" % peak)
 
+    # a can whose origin sits at its base: the offset points straight up
+    base = (0.0, 0.0, 0.4)
+    axis = measure.best_spin_axis(base)
+    print("  origin at the base -> auto axis %d, swing %.4f units"
+          % (axis, measure.spin_swing(base, axis)))
+    assert axis == 2, "should spin flat around Z"
+    assert measure.spin_swing(base, axis) == 0.0, "and not move at all"
 
-def check_pass_window(addon):
-    """The pass window is what makes the spin land in the right frames."""
-    pass_window = addon.measure.pass_window
-    # a storm crossing the origin from -100 to +100 over frames 1..101
-    track = [(float(f), -100.0 + 2.0 * (f - 1), 0.0) for f in range(1, 102)]
+    # the 1.4.0 failure: Random picked X or Y and threw it in an arc
+    for bad in (0, 1):
+        swing = measure.spin_swing(base, bad)
+        print("  ...but around axis %d it would swing %.3f units" % (bad, swing))
+        assert swing > 0.5, "which is the tornado the auto axis avoids"
 
-    win = pass_window(track, 0.0, 0.0, 20.0)
-    print("  storm crossing the origin, reach 20 -> frames %s" % (win,))
-    assert win == (41.0, 61.0), win
+    # an object whose origin is off to one side
+    side = (1.5, 0.0, 0.2)
+    axis = measure.best_spin_axis(side)
+    assert axis == 0, axis
+    assert measure.spin_swing(side, axis) < measure.spin_swing(side, 2)
 
-    off = pass_window(track, 0.0, 15.0, 20.0)
-    print("  object 15 m off the path -> frames %s (shorter window)" % (off,))
-    assert off is not None and (off[1] - off[0]) < (win[1] - win[0])
+    # a centred origin cannot swing, whatever axis it uses
+    for a in (0, 1, 2):
+        assert measure.spin_swing((0.0, 0.0, 0.0), a) == 0.0
 
-    assert pass_window(track, 0.0, 500.0, 20.0) is None, "out of reach -> no spin"
-    assert pass_window([], 0.0, 0.0, 20.0) is None, "empty track -> no spin"
-
-    # a coarse track where the storm crosses inside one sample must still
-    # produce a window with width, not an instant snap
-    coarse = [(float(f), -100.0 + 25.0 * f, 0.0) for f in range(0, 9)]
-    tight = pass_window(coarse, 0.0, 0.0, 5.0)
-    print("  single-sample crossing -> frames %s" % (tight,))
-    assert tight is not None and tight[1] > tight[0], tight
+    props.spin_axis = 'AUTO'
+    assert rig.object_spin_axis(props, rig.object_rng(1, "a", "spin"), 2) == 2
+    assert rig.object_spin_axis(props, rig.object_rng(1, "a", "spin"), 0) == 0
+    props.spin_axis = 'Y'
+    assert rig.object_spin_axis(props, rig.object_rng(1, "a", "spin"), 2) == 1,         "an explicit axis must override Auto"
 
 
 def check_weight_curve(addon):
@@ -368,7 +366,7 @@ def main():
                         ("shake speed", check_speed),
                         ("shake reach and falloff", check_reach),
                         ("spin", check_spin),
-                        ("pass window", check_pass_window),
+                        ("spin pivot", check_spin_pivot),
                         ("weight curve", check_weight_curve),
                         ("phase seeding", check_phases),
                         ("channel ownership", check_ownership)):

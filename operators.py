@@ -49,23 +49,24 @@ class STORMFX_OT_apply(bpy.types.Operator):
         render = scene.render
         fps = render.fps / max(1e-6, render.fps_base)
 
-        # Spin needs to know when the storm passes each object, which means
-        # sampling its path.  That steps the scene, so it happens after every
-        # measurement above is taken, and only when spin is actually on.
-        windows = {}
-        if props.do_shake and props.do_spin:
-            track = measure.storm_track(
-                scene, storm, context.evaluated_depsgraph_get)
-            reach = max(0.0001, props.radius) * max(0.01, props.shake_reach)
-            for o in targets:
-                windows[o] = measure.pass_window(
-                    track, stats[o][0], stats[o][1], reach)
-
         done = 0
         capped = 0
+        swinging = 0
+        worst_swing = 0.0
         for o in targets:
             cx, cy, top_z, size = stats[o]
             lightness = measure.lightness(size, size_min, size_max)
+
+            # Delta rotation pivots on the origin, so an off-centre origin
+            # turns a spin into an arc.  Pick the axis that swings least, and
+            # keep the worst residual to report.
+            offset = measure.origin_offset(o, depsgraph)
+            auto_axis = measure.best_spin_axis(offset)
+            if props.do_shake and props.do_spin:
+                swing = measure.spin_swing(offset, auto_axis)
+                if swing > size * 0.1:
+                    swinging += 1
+                    worst_swing = max(worst_swing, swing)
             ceiling = (bottom - props.ceiling_margin) - top_z
             if ceiling <= 0.0:
                 # already at or above the ceiling: shake only, no lift
@@ -73,7 +74,7 @@ class STORMFX_OT_apply(bpy.types.Operator):
                 if props.do_lift:
                     capped += 1
             rig.apply_to_object(o, storm, props, lightness, (cx, cy), ceiling,
-                                fps, windows.get(o))
+                                fps, auto_axis)
             o.update_tag()
             done += 1
 
@@ -83,9 +84,18 @@ class STORMFX_OT_apply(bpy.types.Operator):
         msg = "Storm FX applied to {} object(s)".format(done)
         if capped:
             msg += " ({} too tall to lift - shake only)".format(capped)
-        if windows and not any(w for w in windows.values()):
-            msg += "; no spin - the storm never passes within reach"
-            self.report({'WARNING'}, msg)
+
+        rigid = sum(1 for o in targets if getattr(o, "rigid_body", None) is not None)
+        if rigid:
+            self.report({'WARNING'}, msg + "; {} have rigid body physics - the "
+                        "delta channels stack on top of the simulation, which "
+                        "does not know about them".format(rigid))
+            return {'FINISHED'}
+        if swinging:
+            self.report({'WARNING'}, msg + "; {} have off-centre origins and "
+                        "will swing up to {:.2f} units when they spin - use "
+                        "Centre Origins, or lower Spin Turns".format(
+                            swinging, worst_swing))
             return {'FINISHED'}
         self.report({'INFO'}, msg)
         return {'FINISHED'}
@@ -174,6 +184,71 @@ class STORMFX_OT_bake(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class STORMFX_OT_center_origins(bpy.types.Operator):
+    bl_idname = "stormfx.center_origins"
+    bl_label = "Centre Origins on Selected"
+    bl_description = ("Move each selected object's origin to the centre of its geometry "
+                      "so rotation spins it in place. Nothing moves on screen, and it is "
+                      "undoable. Skips linked and shared-mesh objects")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        targets = [o for o in context.selected_objects if o.type == 'MESH']
+        if not targets:
+            self.report({'ERROR'}, "Select the objects to centre.")
+            return {'CANCELLED'}
+
+        # Blender refuses to move the origin of linked or multi-user data, and
+        # duplicated library assets very often share one mesh - so filter those
+        # out rather than letting the operator fail on the whole selection.
+        skipped_linked = 0
+        skipped_shared = 0
+        movable = []
+        for o in targets:
+            data = o.data
+            if o.library is not None or (data is not None and data.library is not None):
+                skipped_linked += 1
+            elif data is not None and data.users > 1:
+                skipped_shared += 1
+            else:
+                movable.append(o)
+
+        if not movable:
+            self.report({'WARNING'}, "Nothing to centre: {} linked, {} share mesh "
+                        "data. Make them single-user (Object > Relations > Make "
+                        "Single User > Object & Data) first.".format(
+                            skipped_linked, skipped_shared))
+            return {'CANCELLED'}
+
+        previous = list(context.selected_objects)
+        active = context.view_layer.objects.active
+        try:
+            for o in previous:
+                o.select_set(False)
+            for o in movable:
+                o.select_set(True)
+            context.view_layer.objects.active = movable[0]
+            bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
+        finally:
+            for o in context.selected_objects:
+                o.select_set(False)
+            for o in previous:
+                try:
+                    o.select_set(True)
+                except Exception:
+                    pass
+            context.view_layer.objects.active = active
+
+        msg = "Centred {} origin(s)".format(len(movable))
+        if skipped_linked or skipped_shared:
+            msg += " ({} linked, {} sharing mesh data skipped)".format(
+                skipped_linked, skipped_shared)
+            self.report({'WARNING'}, msg)
+        else:
+            self.report({'INFO'}, msg)
+        return {'FINISHED'}
+
+
 class STORMFX_OT_pick_default_storm(bpy.types.Operator):
     bl_idname = "stormfx.pick_default_storm"
     bl_label = "Auto-detect Storm"
@@ -204,5 +279,6 @@ CLASSES = (
     STORMFX_OT_apply,
     STORMFX_OT_clear,
     STORMFX_OT_bake,
+    STORMFX_OT_center_origins,
     STORMFX_OT_pick_default_storm,
 )

@@ -119,20 +119,20 @@ def wobble_expr(gate, amplitude, base_freq, roughness, rng,
     return "{G}*{A:.6f}*{O}".format(G=gate, A=amplitude / peak, O=osc)
 
 
-def spin_expr(frame_in, frame_out, radians):
-    """Rotation that winds on as the storm passes, then holds.
+def spin_expr(gate, radians):
+    """Rotation that winds on as the storm nears and unwinds as it leaves.
 
-    A driver has no memory - it is a pure function of `frame` and where the
-    storm is right now - so an accumulating spin cannot be integrated from the
-    proximity gate: gating `rate * frame` would wind the object up on the way
-    in and unwind it on the way out.  Instead the frames during which the storm
-    is within reach of this object are found at Apply time, and the rotation
-    ramps between them and clamps at both ends.  Before the pass it is 0, after
-    it the object keeps the orientation it was left in.
+    Gated like everything else, so the object finishes exactly where it
+    started - nothing is left stranded mid-air or turned under the floor.
+
+    Note the pivot: delta rotation turns the object about its *origin*, so an
+    object whose origin is not at its centre arcs around that point instead of
+    spinning in place.  :func:`measure.best_spin_axis` picks the axis that
+    minimises that swing rather than trying to correct it in the expression -
+    correcting it needs sin and cos of the gate on every channel, which does
+    not fit Blender's 256-character driver limit alongside the shake.
     """
-    span = max(1.0, float(frame_out) - float(frame_in))
-    return "min(1.0,max(0.0,(frame-{A:.1f})*{B:.6f}))*{T:.6f}".format(
-        A=frame_in, B=1.0 / span, T=radians)
+    return "{G}*{A:.6f}".format(G=gate, A=radians)
 
 
 def lift_expr(gate, amplitude):
@@ -160,20 +160,29 @@ def object_speed_hz(props, lightness, rng):
 _SPIN_AXIS_INDEX = {'X': 0, 'Y': 1, 'Z': 2}
 
 
-def object_spin_axis(props, rng):
-    """Which axis this object tumbles around."""
+def object_spin_axis(props, rng, auto_axis=2):
+    """Which axis this object turns around.
+
+    ``auto_axis`` is the axis :func:`measure.best_spin_axis` picked from the
+    object's origin offset, used when Spin Axis is set to Auto.
+    """
+    if props.spin_axis == 'AUTO':
+        return auto_axis
     if props.spin_axis == 'RANDOM':
         return rng.choice((0, 1, 2))
     return _SPIN_AXIS_INDEX.get(props.spin_axis, 2)
 
 
-def object_spin_radians(props, factor, rng):
-    """Total rotation this object picks up over the pass, in radians.
+def object_spin_radians(props, lightness, rng):
+    """Peak rotation this object reaches under the storm, in radians.
 
-    Weight-scaled, spread by Spin Variation, and randomly signed - half the
-    pile tumbling one way and half the other is most of what sells it.
+    Spin has its own weight curve rather than sharing the amplitude one: the
+    point of the control is that the small pieces whip round and the heavy ones
+    barely turn, so *Spin by Weight* at 1.0 means the biggest object in the
+    selection does not spin at all.
     """
-    turns = props.spin_turns * factor
+    scale = (1.0 - props.spin_by_weight) + props.spin_by_weight * lightness
+    turns = props.spin_turns * max(0.0, scale)
     if props.spin_variation > 0.0:
         turns *= 1.0 + props.spin_variation * rng.uniform(-1.0, 1.0)
     if rng.random() < 0.5:
@@ -261,14 +270,13 @@ def add_driver(obj, data_path, index, storm, expression):
 
 
 def apply_to_object(obj, storm, props, lightness, rest, ceiling, fps,
-                    spin_window=None):
+                    auto_spin_axis=2):
     """Build the rig on one object.
 
     ``lightness`` is 1.0 for the smallest object in the selection and 0.0 for
     the largest, ``rest`` is the object's resting ``(center_x, center_y)``, and
-    ``ceiling`` its available headroom under the storm, and ``spin_window`` the
-    ``(first_frame, last_frame)`` during which the storm passes it - ``None``
-    if spin is off or the storm never comes near.  Channels that end up
+    ``ceiling`` is its available headroom under the storm, and
+    ``auto_spin_axis`` the axis that swings it least.  Channels that end up
     undriven are reset, not just left alone.
     """
     factor = measure.light_factor(lightness, props.min_factor)
@@ -281,7 +289,7 @@ def apply_to_object(obj, storm, props, lightness, rest, ceiling, fps,
 
     _apply_lift(obj, storm, props, factor, ceiling, lift_gate)
     _apply_shake(obj, storm, props, factor, lightness, shake_gate, fps,
-                 spin_window)
+                 auto_spin_axis)
     _apply_rattle(obj, storm, props, factor, lightness, shake_gate, fps)
 
 
@@ -294,15 +302,15 @@ def _apply_lift(obj, storm, props, factor, ceiling, gate):
         channels.reset_channel(obj, channels.LIFT_PATH, channels.LIFT_INDEX)
 
 
-def _apply_shake(obj, storm, props, factor, lightness, gate, fps, spin_window):
+def _apply_shake(obj, storm, props, factor, lightness, gate, fps, auto_spin_axis):
     axes = shake_axes(props)
 
     spin_axis = None
     spin_radians = 0.0
-    if props.do_shake and props.do_spin and spin_window is not None:
+    if props.do_shake and props.do_spin:
         spin_rng = object_rng(props.seed, obj.name, "spin")
-        spin_axis = object_spin_axis(props, spin_rng)
-        spin_radians = object_spin_radians(props, factor, spin_rng)
+        spin_axis = object_spin_axis(props, spin_rng, auto_spin_axis)
+        spin_radians = object_spin_radians(props, lightness, spin_rng)
         if abs(spin_radians) < 1e-9:
             spin_axis = None
 
@@ -315,9 +323,7 @@ def _apply_shake(obj, storm, props, factor, lightness, gate, fps, spin_window):
     hz = object_speed_hz(props, lightness, object_rng(props.seed, obj.name, "speed"))
     for a in (0, 1, 2):
         terms = []
-        spin_term = ""
-        if a == spin_axis:
-            spin_term = spin_expr(spin_window[0], spin_window[1], spin_radians)
+        spin_term = spin_expr(gate, spin_radians) if a == spin_axis else ""
 
         amplitude = math.radians(axis_degrees(props, a)) * factor
         if a in axes and amplitude > 1e-9 and hz > 0.0:
